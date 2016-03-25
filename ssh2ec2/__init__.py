@@ -4,7 +4,22 @@ from botocore.exceptions import ProfileNotFound
 import sys
 import random
 import os
+import ConfigParser
 
+def get_config_value(profile_name, key, default):
+    profile = 'profile ' + profile_name if profile_name else 'default'
+    config = ConfigParser.SafeConfigParser()
+    if os.path.isfile( os.path.expanduser('~') + '/.aws/config'):
+        config.read( os.path.expanduser('~') + '/.aws/config')
+    try:
+        value = config.get( profile, key )
+    except ConfigParser.NoOptionError:
+        try:
+            value = config.get( 'default', key )
+        except ConfigParser.NoOptionError:
+            value = default
+
+    return value
 
 def get_filters(args):
     """ Return a dict of filters based on the given arguments """
@@ -139,28 +154,30 @@ def main():
         print('No instances matching criteria')
         sys.exit(1)
 
+    key_to_use = get_config_value( args.profile, 'key_to_use', 'PublicDnsName' )
     instance_dns_names = [[
-        instance['PublicDnsName'] for instance in reservation['Instances']][0]
+        instance[key_to_use] for instance in reservation['Instances']][0]
         for reservation
         in reservations['Reservations']]
-    if args.all_matching_instances:
+    if args.all_matching_instances or args.command:
         pass
     else:
         # Pick a random instance from the results
         instance_dns_names = [instance_dns_names[random.randrange(0, len(instance_dns_names))]]
 
-    if args.command:
-        remote_command = ' '.join(args.command)
-    else:
-        remote_command = ''
+    remote_command = ' '.join(args.command) if args.command else ''
+
+    user = args.ssh_user if args.ssh_user else get_config_value( args.profile, 'ssh_user', '' )
+
+    ssh_args = args.ssh_args if args.ssh_args else get_config_value( args.profile, 'ssh_args', '' )
 
     for dns_name in instance_dns_names:
-        if args.ssh_user:
-            dns_name = '%s@%s' % (args.ssh_user, dns_name)
+        if user != "":
+            dns_name = '%s@%s' % (user, dns_name)
 
-        ssh_cmd = 'ssh %s %s %s' % (args.ssh_args, dns_name, remote_command)
+        ssh_cmd = 'ssh %s %s %s' % (ssh_args, dns_name, remote_command)
+        # print( ssh_cmd )
         os.system(ssh_cmd)
-
 
 if __name__ == '__main__':
     main()
